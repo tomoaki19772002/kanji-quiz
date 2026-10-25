@@ -27,7 +27,7 @@ main{width:100%;max-width:560px;padding:12px 16px 24px;display:flex;flex-directi
 .choices button.ok small{color:#fff}
 .choices button.ng{background:var(--ng);border-color:var(--ng);color:#fff}
 .choices button.ng small{color:#fff}
-.fx{height:24px;text-align:center;font-weight:bold;font-size:18px}
+.fx{min-height:24px;text-align:center;font-weight:bold;font-size:18px}
 .big{font-size:20px;border:0;background:var(--accent);color:#fff;border-radius:16px;padding:16px 32px;font-weight:bold;cursor:pointer;font-family:inherit}
 .hidden{display:none!important}
 #mute{position:fixed;top:8px;right:8px;font-size:22px;background:var(--card);border:2px solid var(--line);border-radius:50%;width:44px;height:44px;cursor:pointer;z-index:5}
@@ -182,14 +182,18 @@ function next(){
     $('tag').textContent = '② 部首';
     $('q').textContent = 'この漢字の部首はどれ？';
     const correct = String(k.r);
-    const pool = shuffle(RAD_IDS).filter(r => r !== correct);
-    opts = shuffle([correct, ...pool.slice(0, 3)]).map(v => ({ label: RAD[v][0], sub: RAD[v][1], ok: v === correct }));
+    // 選択肢はひらがなの名前のみ。同じ名前(ひ・きなど)が並ばないようにする
+    const picked = [correct], seen = new Set([RAD[correct][1]]);
+    for (const r of shuffle(RAD_IDS)){
+      if (picked.length === 4) break;
+      if (!seen.has(RAD[r][1])){ seen.add(RAD[r][1]); picked.push(r); }
+    }
+    opts = shuffle(picked).map(v => ({ label: RAD[v][1], ch: RAD[v][0], ok: v === correct }));
   }
   const box = $('choices'); box.innerHTML = '';
   opts.forEach(o => {
     const b = document.createElement('button');
     b.textContent = o.label;
-    if (o.sub){ const s = document.createElement('small'); s.textContent = o.sub; b.appendChild(s); }
     b.onclick = () => answer(b, o, opts);
     o.el = b;
     box.appendChild(b);
@@ -200,14 +204,17 @@ function answer(btn, o, opts){
   if (locked || state !== 'play') return;
   locked = true;
   const fx = $('fx');
-  if (o.ok){ score++; right++; btn.classList.add('ok'); sfxOk(); fx.textContent = '⭕ +1'; fx.style.color = 'var(--ok)'; }
+  // 部首の問題は、選んだあとに部首の字を答えと併記する
+  opts.forEach(x => { if (x.ch){ x.el.textContent = x.ch + '　' + x.label; } });
+  const c = opts.find(x => x.ok), hint = c.ch ? '　部首は「' + c.ch + '」' : '';
+  if (o.ok){ score++; right++; btn.classList.add('ok'); sfxOk(); fx.textContent = '⭕ +1' + hint; fx.style.color = 'var(--ok)'; }
   else {
     sfxNg(); score--; wrong++; btn.classList.add('ng'); fx.style.color = 'var(--ng)';
-    const c = opts.find(x => x.ok); c.el.classList.add('ok');
-    fx.textContent = '❌ −1　正解は「' + c.label + '」';
+    c.el.classList.add('ok');
+    fx.textContent = '❌ −1　正解は「' + c.label + '」' + hint;
   }
   $('score').textContent = score;
-  setTimeout(next, o.ok ? FEEDBACK_MS : FEEDBACK_MS + 600);
+  setTimeout(next, (o.ok ? FEEDBACK_MS : FEEDBACK_MS + 600) + (c.ch ? 400 : 0));
 }
 
 function finish(){
