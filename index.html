@@ -30,11 +30,13 @@ main{width:100%;max-width:560px;padding:12px 16px 24px;display:flex;flex-directi
 .fx{height:24px;text-align:center;font-weight:bold;font-size:18px}
 .big{font-size:20px;border:0;background:var(--accent);color:#fff;border-radius:16px;padding:16px 32px;font-weight:bold;cursor:pointer;font-family:inherit}
 .hidden{display:none!important}
+#mute{position:fixed;top:8px;right:8px;font-size:22px;background:var(--card);border:2px solid var(--line);border-radius:50%;width:44px;height:44px;cursor:pointer;z-index:5}
 #end .score{font-size:72px;font-weight:bold;margin:4px 0}
 p{margin:6px 0}
 </style>
 </head>
 <body>
+<button id="mute" aria-label="音のオンオフ">🔊</button>
 <main>
   <div class="hud">
     <div><small>ポイント</small><b id="score">0</b></div>
@@ -83,6 +85,52 @@ const ALL_ON = [...new Set(KANJI.flatMap(k => k.on))];
 const ALL_KUN = [...new Set(KANJI.flatMap(k => k.kun))];
 const RAD_IDS = Object.keys(RAD);
 
+
+// ---- 効果音とBGM(Web Audio、音源ファイル不要) ----
+let ac = null, master = null, muted = false, bgmTimer = null, nextT = 0, beat = 0;
+function audioInit(){
+  if (!ac){
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    ac = new AC(); master = ac.createGain(); master.gain.value = muted ? 0 : 1; master.connect(ac.destination);
+  }
+  if (ac.state === 'suspended') ac.resume();
+}
+function tone(freq, t, dur, type, vol){
+  if (!ac) return;
+  const o = ac.createOscillator(), g = ac.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, t);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(vol, t + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t + dur + 0.05);
+}
+function sfxOk(){ if (!ac) return; const t = ac.currentTime; tone(880, t, 0.12, 'sine', 0.35); tone(1318.5, t + 0.1, 0.25, 'sine', 0.35); }
+function sfxNg(){ if (!ac) return; const t = ac.currentTime; tone(220, t, 0.18, 'sawtooth', 0.2); tone(165, t + 0.15, 0.3, 'sawtooth', 0.2); }
+function sfxEnd(){ if (!ac) return; const t = ac.currentTime; [784, 659, 523].forEach((f, i) => tone(f, t + i * 0.18, 0.3, 'triangle', 0.3)); }
+
+// 明るいペンタトニックの8拍ループ(メロディ+ベース)
+const STEP = 0.2;
+const MELODY = [523.25, 659.25, 783.99, 659.25, 880, 783.99, 659.25, 587.33, 523.25, 659.25, 783.99, 1046.5, 880, 783.99, 659.25, 587.33];
+const BASS = [130.81, 130.81, 196, 196, 220, 220, 196, 196];
+function schedule(){
+  while (nextT < ac.currentTime + 0.3){
+    const i = beat % MELODY.length;
+    tone(MELODY[i], nextT, STEP * 0.9, 'triangle', 0.09);
+    if (i % 2 === 0) tone(BASS[(i / 2) % BASS.length], nextT, STEP * 1.8, 'sine', 0.12);
+    nextT += STEP; beat++;
+  }
+}
+function bgmStart(){ if (!ac) return; bgmStop(); beat = 0; nextT = ac.currentTime + 0.1; bgmTimer = setInterval(schedule, 100); schedule(); }
+function bgmStop(){ clearInterval(bgmTimer); bgmTimer = null; }
+function setMuted(m){
+  muted = m; $('mute').textContent = m ? '🔇' : '🔊';
+  if (master) master.gain.setTargetAtTime(m ? 0 : 1, ac.currentTime, 0.02);
+  try { localStorage.setItem('kanjiQuizMuted', m ? '1' : ''); } catch(e){}
+}
+$('mute').onclick = () => { audioInit(); setMuted(!muted); };
+try { muted = !!localStorage.getItem('kanjiQuizMuted'); $('mute').textContent = muted ? '🔇' : '🔊'; } catch(e){}
+
 let score, right, wrong, deadline, timer, queue, step, locked, state = 'idle';
 
 function bestGet(){ try { return +localStorage.getItem('kanjiQuizBest') || 0; } catch(e){ return 0; } }
@@ -92,12 +140,14 @@ function showBest(){ const b = bestGet(); $('best').textContent = b ? 'ハイス
 function fmt(sec){ const s = Math.max(0, Math.ceil(sec)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
 
 function start(){
+  audioInit();
   score = right = wrong = 0; step = 0; state = 'play';
   queue = shuffle(KANJI);
   $('score').textContent = 0;
   $('start').classList.add('hidden'); $('end').classList.add('hidden'); $('play').classList.remove('hidden');
   deadline = Date.now() + DURATION * 1000;
   clearInterval(timer); timer = setInterval(tick, 100); tick();
+  bgmStart();
   next();
 }
 
@@ -150,9 +200,9 @@ function answer(btn, o, opts){
   if (locked || state !== 'play') return;
   locked = true;
   const fx = $('fx');
-  if (o.ok){ score++; right++; btn.classList.add('ok'); fx.textContent = '⭕ +1'; fx.style.color = 'var(--ok)'; }
+  if (o.ok){ score++; right++; btn.classList.add('ok'); sfxOk(); fx.textContent = '⭕ +1'; fx.style.color = 'var(--ok)'; }
   else {
-    score--; wrong++; btn.classList.add('ng'); fx.style.color = 'var(--ng)';
+    sfxNg(); score--; wrong++; btn.classList.add('ng'); fx.style.color = 'var(--ng)';
     const c = opts.find(x => x.ok); c.el.classList.add('ok');
     fx.textContent = '❌ −1　正解は「' + c.label + '」';
   }
@@ -162,7 +212,7 @@ function answer(btn, o, opts){
 
 function finish(){
   if (state !== 'play') return;
-  state = 'end'; clearInterval(timer);
+  state = 'end'; clearInterval(timer); bgmStop(); sfxEnd();
   $('time').textContent = '0:00';
   $('play').classList.add('hidden'); $('end').classList.remove('hidden');
   $('final').textContent = score + ' ポイント';
