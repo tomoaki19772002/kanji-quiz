@@ -30,6 +30,8 @@ main{width:100%;max-width:560px;padding:12px 16px 24px;display:flex;flex-directi
 .fx{min-height:24px;text-align:center;font-weight:bold;font-size:18px}
 .big{font-size:20px;border:0;background:var(--accent);color:#fff;border-radius:16px;padding:16px 32px;font-weight:bold;cursor:pointer;font-family:inherit}
 .hidden{display:none!important}
+.rank{margin:10px auto;text-align:left;display:inline-block;line-height:1.7}
+#nameIn{font:inherit;font-size:18px;padding:10px;border:2px solid var(--line);border-radius:12px;width:11em;max-width:100%}
 #mute{position:fixed;top:8px;right:8px;font-size:22px;background:var(--card);border:2px solid var(--line);border-radius:50%;width:44px;height:44px;cursor:pointer;z-index:5}
 #end .score{font-size:72px;font-weight:bold;margin:4px 0}
 p{margin:6px 0}
@@ -49,7 +51,7 @@ p{margin:6px 0}
     <p>小学1〜6年生の漢字 1026字</p>
     <p>①読み方 → ②部首 の4択をくりかえし出題！</p>
     <p>正解 <b style="color:var(--ok)">+1</b>　まちがい <b style="color:var(--ng)">−1</b>　制限時間 2分</p>
-    <p id="best" style="color:#8a7a55"></p>
+    <div id="rankStart" class="rank"></div>
     <button class="big" id="go">スタート</button>
   </section>
 
@@ -67,7 +69,12 @@ p{margin:6px 0}
     <h2 style="margin:4px 0">タイムアップ！</h2>
     <div class="score" id="final"></div>
     <p id="detail"></p>
-    <p id="newbest" style="color:var(--accent);font-weight:bold"></p>
+    <form id="nameForm" class="hidden" style="margin:10px 0">
+      <p style="color:var(--accent);font-weight:bold">🎉 TOP3 入り！名前を書いてね</p>
+      <input id="nameIn" maxlength="8" placeholder="なまえ(8文字まで)" autocomplete="off">
+      <button class="big" style="padding:10px 20px;font-size:16px">登録</button>
+    </form>
+    <div id="rankEnd" class="rank"></div>
     <button class="big" id="again">もういちど</button>
   </section>
 </main>
@@ -133,9 +140,22 @@ try { muted = !!localStorage.getItem('kanjiQuizMuted'); $('mute').textContent = 
 
 let score, right, wrong, deadline, timer, queue, step, locked, state = 'idle';
 
-function bestGet(){ try { return +localStorage.getItem('kanjiQuizBest') || 0; } catch(e){ return 0; } }
-function bestSet(v){ try { localStorage.setItem('kanjiQuizBest', v); } catch(e){} }
-function showBest(){ const b = bestGet(); $('best').textContent = b ? 'ハイスコア：' + b + ' ポイント' : ''; }
+// ランキング(TOP3)。この端末のブラウザに保存される
+function rankGet(){ try { const r = JSON.parse(localStorage.getItem('kanjiQuizTop3')); return Array.isArray(r) ? r : []; } catch(e){ return []; } }
+function rankSave(r){ try { localStorage.setItem('kanjiQuizTop3', JSON.stringify(r)); } catch(e){} }
+function lastName(){ try { return localStorage.getItem('kanjiQuizName') || ''; } catch(e){ return ''; } }
+function qualifies(s){ const r = rankGet(); return s > 0 && (r.length < 3 || s > r[r.length - 1].score); }
+function renderRank(id, hiIdx){
+  const r = rankGet(), el = $(id);
+  el.innerHTML = '<b>🏆 TOP3</b>';
+  if (!r.length){ el.innerHTML += '<div style="color:#8a7a55">まだ記録がありません</div>'; return; }
+  r.forEach((e, i) => {
+    const d = document.createElement('div');
+    d.textContent = ['🥇', '🥈', '🥉'][i] + ' ' + e.name + '　' + e.score + 'ポイント';
+    if (i === hiIdx) d.style.cssText = 'color:var(--accent);font-weight:bold';
+    el.appendChild(d);
+  });
+}
 
 function fmt(sec){ const s = Math.max(0, Math.ceil(sec)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
 
@@ -224,15 +244,28 @@ function finish(){
   $('play').classList.add('hidden'); $('end').classList.remove('hidden');
   $('final').textContent = score + ' ポイント';
   $('detail').textContent = '正解 ' + right + ' 問 ／ まちがい ' + wrong + ' 問';
-  const b = bestGet();
-  $('newbest').textContent = score > b ? '🎉 ハイスコア更新！' : '';
-  if (score > b) bestSet(score);
-  showBest();
+  const q = qualifies(score);
+  $('nameForm').classList.toggle('hidden', !q);
+  if (q){ $('nameIn').value = lastName(); setTimeout(() => $('nameIn').focus(), 100); }
+  renderRank('rankEnd', -1);
 }
 
+$('nameForm').onsubmit = e => {
+  e.preventDefault();
+  const name = $('nameIn').value.trim().slice(0, 8) || 'ななし';
+  try { localStorage.setItem('kanjiQuizName', name); } catch(err){}
+  const r = rankGet();
+  const entry = { name, score };
+  let idx = r.findIndex(x => score > x.score); if (idx < 0) idx = r.length;
+  r.splice(idx, 0, entry); r.length = Math.min(r.length, 3);
+  rankSave(r);
+  $('nameForm').classList.add('hidden');
+  renderRank('rankEnd', idx);
+};
+
 $('go').onclick = start;
-$('again').onclick = start;
-showBest();
+$('again').onclick = () => { renderRank('rankStart', -1); start(); };
+renderRank('rankStart', -1);
 </script>
 </body>
 </html>
